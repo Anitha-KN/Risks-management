@@ -1,0 +1,229 @@
+_schema-version: '3.1'
+ID: riskmanagement
+version: 1.0.0
+description: A simple CAP project.
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+  subdomain: yuva-brgf6cjh
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - rm -rf build/dist
+        - mkdir -p build/dist
+        - rm -rf build/ui-deployer
+        - mkdir -p build/ui-deployer
+    - builder: custom
+      commands:
+        - npm install --production
+        - >-
+          bash -c "cds -v | grep 'cds-dk' || npm i --production --no-save
+          @sap/cds-dk"
+        - bash -c "export PATH=$PATH:$(pwd)/node_modules/.bin"
+        - cds build --production
+  after-all:
+    - builder: custom
+      commands:
+        - npm install
+modules:
+  - name: riskmanagement-riskmanagement.risks
+    type: html5
+    path: app/riskmanagement.risks
+    build-parameters:
+      builder: custom
+      commands:
+        - rm -rf dist-zip dist
+        - npm install
+        - >-
+          npx -p @ui5/cli@^3.0.0 ui5 build --dest dist
+          --include-task=generateCachebusterInfo
+        - mkdir dist-zip
+        - bash -c "cd dist && npx bestzip ../dist-zip/riskmanagementrisks.zip *"
+      _artifactName: riskmanagementrisks.zip
+      supported-platforms: []
+      build-result: dist-zip
+  - name: riskmanagement-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: riskmanagement-service-uaa
+      - name: riskmanagement-service-db
+  - name: riskmanagement-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      memory: 256MB
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    build-parameters:
+      builder: npm
+      ignore:
+        - node_modules
+        - package-lock.json
+    requires:
+      - name: riskmanagement-service-uaa
+      - name: riskmanagement-service-db
+      - name: riskmanagement-service-destination
+      - name: riskmanagement-service-metadata
+      - name: riskmanagement-service-connectivity
+      - name: riskmanagement-service-logs
+  - name: riskmanagement-aux-destinations
+    type: com.sap.application.content
+    parameters:
+      content:
+        subaccount:
+          existing_destinations_policy: update
+          destinations:
+            - Authentication: OAuth2UserTokenExchange
+              Name: riskmanagement-service-uaa
+              ServiceInstanceName: riskmanagement-uaa
+              ServiceKeyName: riskmanagement-uaa-key
+              sap.cloud.service: lcap.riskmanagement
+            - Authentication: OAuth2UserTokenExchange
+              Name: riskmanagement-app-srv
+              TokenServiceInstanceName: riskmanagement-uaa
+              TokenServiceKeyName: riskmanagement-uaa-key
+              URL: ~{srv-api/srv-url}
+              sap.cloud.service: lcap.riskmanagement
+            - Name: riskmanagement-service-html5-apps-repo-host
+              ServiceInstanceName: riskmanagement-html5-apps-repo-host
+              ServiceKeyName: riskmanagement-html5-apps-repo-host-key
+              sap.cloud.service: lcap.riskmanagement
+            - Authentication: OAuth2UserTokenExchange
+              Name: riskmanagement-riskmanagementService
+              TokenServiceInstanceName: riskmanagement-uaa
+              TokenServiceKeyName: riskmanagement-uaa-key
+              URL: ~{srv-api/srv-url}/service/riskmanagementService
+              sap.cloud.service: lcap.riskmanagement
+              sap.applicationdevelopment.actions.enabled: false
+              sap.build.usage: CAP
+              sap.processautomation.enabled: false
+              HTML5.DynamicDestination: false
+              WebIDEEnabled: false
+              MobileEnabled: false
+              AppgyverEnabled: false
+    build-parameters:
+      no-source: true
+    requires:
+      - name: riskmanagement-service-uaa
+        parameters:
+          service-key:
+            name: riskmanagement-uaa-key
+      - name: srv-api
+      - name: riskmanagement-service-html5-apps-repo-host
+        parameters:
+          service-key:
+            name: riskmanagement-html5-apps-repo-host-key
+      - name: riskmanagement-service-destination
+        parameters:
+          content-target: true
+  - name: riskmanagement-launchpad
+    type: html5
+    path: build/launchpad
+    build-parameters:
+      builder: custom
+      commands:
+        - npm install
+        - >-
+          npx -p @ui5/cli@^3.0.0 ui5 build --dest dist
+          --include-task=generateCachebusterInfo
+        - bash -c "cd dist && npx bestzip ../../../build/dist/launchpad.zip *"
+        - rm -rf dist
+      _artifactName: launchpad.zip
+      supported-platforms: []
+      build-result: ../../build/dist
+  - name: riskmanagement-aux-ui-deployer
+    type: com.sap.application.content
+    path: build/ui-deployer
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: riskmanagement-riskmanagement.risks
+          artifacts:
+            - riskmanagementrisks.zip
+          target-path: resources
+        - name: riskmanagement-launchpad
+          artifacts:
+            - launchpad.zip
+          target-path: resources
+    requires:
+      - name: riskmanagement-service-html5-apps-repo-host
+        parameters:
+          content-target: true
+resources:
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-uaa
+    parameters:
+      service: xsuaa
+      service-plan: application
+      service-name: riskmanagement-uaa
+      path: xs-security.json
+      config:
+        oauth2-configuration:
+          redirect-uris:
+            - https://${subdomain}.launchpad.${default-domain}/login/*
+            - https://${subdomain}.${default-domain}/login/*
+          credential-types:
+            - binding-secret
+            - x509
+        xsappname: riskmanagement-${space}
+        role-collections:
+          - description: RiskViewer
+            name: riskmanagement-RiskViewer-${space}
+            role-template-references:
+              - $XSAPPNAME.RiskViewer
+          - description: RiskManager
+            name: riskmanagement-RiskManager-${space}
+            role-template-references:
+              - $XSAPPNAME.RiskManager
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-db
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+      service-name: riskmanagement-db
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-destination
+    parameters:
+      service: destination
+      service-plan: lite
+      service-name: riskmanagement-destination
+      config:
+        HTML5Runtime_enabled: true
+        version: 1.0.0
+  - type: org.cloudfoundry.user-provided-service
+    name: riskmanagement-service-metadata
+    parameters:
+      service: metadata
+      service-plan: standard
+      service-name: riskmanagement-metadata
+      config:
+        default-domain: ${default-domain}
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-connectivity
+    parameters:
+      service: connectivity
+      service-plan: lite
+      service-name: riskmanagement-connectivity
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-logs
+    parameters:
+      service: application-logs
+      service-plan: lite
+      service-name: riskmanagement-logs
+  - type: org.cloudfoundry.managed-service
+    name: riskmanagement-service-html5-apps-repo-host
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+      service-name: riskmanagement-html5-apps-repo-host
