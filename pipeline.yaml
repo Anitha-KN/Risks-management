@@ -1,14 +1,29 @@
-version: "2.0"
+version: '2.0'
 
-steps:
-  - name: Build and Test
-    image: node:lts
-    script:
-      - npm install
-      - npm test
+stages:
+  - build
+  - test
+  - deploy
 
-  - name: Deploy to Cloud Foundry
-    image: sap/cf-cli
-    script:
-      - cf login -a $CF_API_ENDPOINT -u $CF_USERNAME -p $CF_PASSWORD -o $CF_ORG -s $CF_SPACE
-      - cf push
+build:
+  stage: build
+  image: node:16
+  script:
+    - npm install
+    - npm run build
+
+test:
+  stage: test
+  image: node:16
+  script:
+    - npm test
+
+deploy:
+  stage: deploy
+  image: node:16
+  script:
+    - cf login -a https://api.cf.<region>.hana.ondemand.com -u $CF_USERNAME -p $CF_PASSWORD -o $CF_ORG -s $CF_SPACE
+    - npm run deploy
+  environment:
+    name: production
+  when: manual
