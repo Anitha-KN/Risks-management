@@ -1,13 +1,14 @@
-version: '1.0'
+version: "2.0"
+
 steps:
-  - name: build
-    image: node:14
+  - name: Build and Test
+    image: node:lts
     script:
       - npm install
-      - npm run build
+      - npm test
 
-  - name: deploy
+  - name: Deploy to Cloud Foundry
     image: sap/cf-cli
     script:
-      - cf login -a <api_endpoint> -u $CF_USER -p $CF_PASSWORD -o $CF_ORG -s $CF_SPACE
+      - cf login -a $CF_API_ENDPOINT -u $CF_USERNAME -p $CF_PASSWORD -o $CF_ORG -s $CF_SPACE
       - cf push
